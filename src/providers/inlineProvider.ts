@@ -1,27 +1,39 @@
 import * as vscode from 'vscode';
 import { queryLLM } from '../llm/queryLLM';
 
-export function registerInlineProvider(context: vscode.ExtensionContext) {
-  context.subscriptions.push(
-    vscode.languages.registerInlineCompletionItemProvider({ scheme: 'file' }, {
-      async provideInlineCompletionItems(document, position) {
-        const linePrefix = document.lineAt(position).text.substring(0, position.character);
-        const filePrefix = document.getText(new vscode.Range(
-          new vscode.Position(Math.max(0, position.line - 10), 0),
-          position
-        ));
+export class InlineCodeCompletionProvider implements vscode.InlineCompletionItemProvider {
+  async provideInlineCompletionItems(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+    context: vscode.InlineCompletionContext,
+    token: vscode.CancellationToken
+  ): Promise<vscode.InlineCompletionList> {
+    const linePrefix = document.lineAt(position).text.substring(0, position.character);
+    if (!linePrefix.trim()) return { items: [] };
 
-        const prompt = `Continue the following code:\n\n${filePrefix}${linePrefix}`;
-        const result = await queryLLM(prompt);
-        if (!result) return [];
+    const prompt = `Continue this code with only the next line of code, no explanation:\n${linePrefix}`;
+    console.log('[InlineProvider] Prompt sent to LLM:', prompt);
 
-        return [
-          {
-            insertText: result,
-            range: new vscode.Range(position, position),
-          }
-        ];
-      }
-    })
-  );
+    const raw = await queryLLM(prompt);
+    if (!raw) return { items: [] };
+
+    const cleaned = raw.replace(/```[\s\S]*?```/, '').trim();
+    const lines = cleaned.split('\n').map(line => line.trim()).filter(Boolean);
+    const suggestion = lines[0] || '';
+    console.log('[InlineProvider] Final Suggestion Inserted:', suggestion);
+
+    if (!suggestion) return { items: [] };
+
+    const currentLine = document.lineAt(position);
+    const range = new vscode.Range(position, currentLine.range.end);
+
+    return {
+      items: [
+        {
+          insertText: suggestion,
+          range,
+        }
+      ]
+    };
+  }
 }
